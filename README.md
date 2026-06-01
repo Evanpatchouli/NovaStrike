@@ -1,5 +1,7 @@
 # NovaStrike
 
+> Current stable version: `v1.0.0`
+
 NovaStrike 是一个面向 CS2 的本地状态看板，基于 Game State Integration (GSI) 展示连接状态与基础对局信息。
 
 当前功能包括：
