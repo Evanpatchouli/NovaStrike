@@ -1,6 +1,6 @@
 {
   "name": "nova-strike",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "NovaStrike - CS2 practice telemetry assistant powered by GSI.",
   "packageManager": "pnpm@10.0.0",
