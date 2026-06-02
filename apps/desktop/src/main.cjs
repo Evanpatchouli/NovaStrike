@@ -1,10 +1,22 @@
 const { app, BrowserWindow, Menu, Tray, nativeImage, globalShortcut, shell, ipcMain } = require("electron");
+const { spawn } = require("node:child_process");
 const fs = require("node:fs");
+const net = require("node:net");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 const OVERLAY_ORIGIN = "http://127.0.0.1:5173";
 let mainWindow;
 let tray;
+let backendProcess;
+let runtimeConfig;
+let backendStatus = { ok: true, message: "" };
+
+const DEFAULT_RUNTIME_CONFIG = {
+  steamLibraryPath: "",
+  httpPort: 37653,
+  wsPort: 37654
+};
 
 function getIconPath(fileName) {
   return path.join(__dirname, "..", "assets", fileName);
@@ -12,6 +24,62 @@ function getIconPath(fileName) {
 
 function getUiPrefsPath() {
   return path.join(app.getPath("userData"), "ui-prefs.json");
+}
+
+function getRuntimeConfigPath() {
+  return path.join(app.getPath("appData"), "NovaStrike", "config.json");
+}
+
+function normalizePort(value, fallback) {
+  const num = Number(value);
+  if (!Number.isInteger(num) || num < 1 || num > 65535) return fallback;
+  return num;
+}
+
+function normalizeRuntimeConfig(input) {
+  return {
+    steamLibraryPath: typeof input?.steamLibraryPath === "string" ? input.steamLibraryPath.trim() : "",
+    httpPort: normalizePort(input?.httpPort, DEFAULT_RUNTIME_CONFIG.httpPort),
+    wsPort: normalizePort(input?.wsPort, DEFAULT_RUNTIME_CONFIG.wsPort)
+  };
+}
+
+function ensureRuntimeConfigFile() {
+  const configPath = getRuntimeConfigPath();
+  if (!fs.existsSync(configPath)) {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify(DEFAULT_RUNTIME_CONFIG, null, 2), "utf8");
+  }
+}
+
+function loadRuntimeConfig() {
+  ensureRuntimeConfigFile();
+  const raw = fs.readFileSync(getRuntimeConfigPath(), "utf8");
+  const parsed = JSON.parse(raw);
+  return normalizeRuntimeConfig(parsed);
+}
+
+function saveRuntimeConfig(nextConfig) {
+  const normalized = normalizeRuntimeConfig(nextConfig);
+  fs.mkdirSync(path.dirname(getRuntimeConfigPath()), { recursive: true });
+  fs.writeFileSync(getRuntimeConfigPath(), JSON.stringify(normalized, null, 2), "utf8");
+  runtimeConfig = normalized;
+  return normalized;
+}
+
+function getBackendLogPath() {
+  if (app.isPackaged) {
+    return path.join(path.dirname(process.execPath), "backend.log");
+  }
+  return path.join(app.getPath("userData"), "backend.log");
+}
+
+function appendBackendLog(line) {
+  try {
+    fs.appendFileSync(getBackendLogPath(), `${new Date().toISOString()} ${line}\n`, "utf8");
+  } catch {
+    // ignore write failures
+  }
 }
 
 function loadUiPrefs() {
@@ -84,7 +152,150 @@ function saveWindowState(window) {
 }
 
 function isOverlayUrl(url) {
-  return url.startsWith(OVERLAY_ORIGIN);
+  if (url.startsWith(OVERLAY_ORIGIN)) return true;
+  if (!app.isPackaged) return false;
+  return url.startsWith(pathToFileURL(getOverlayIndexPath()).toString());
+}
+
+function getOverlayIndexPath() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "overlay-dist", "index.html");
+  }
+  return path.join(__dirname, "..", "..", "overlay", "dist", "index.html");
+}
+
+function getBackendEntryPath() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "backend-dist", "index.cjs");
+  }
+  return path.join(__dirname, "..", "..", "backend", "dist-bundle", "index.cjs");
+}
+
+function getGsiTemplatePath() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "gsi-template", "gamestate_integration_novastrike.cfg");
+  }
+  return path.join(__dirname, "..", "..", "..", "docs", "gamestate_integration_novastrike.cfg");
+}
+
+function canListenOnPort(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once("error", () => resolve(false));
+    server.once("listening", () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, "127.0.0.1");
+  });
+}
+
+async function waitForBackendReady(config, timeoutMs = 8000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${config.httpPort}/health`);
+      if (response.ok) return true;
+    } catch {
+      // keep waiting
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return false;
+}
+
+function stopEmbeddedBackend() {
+  if (!backendProcess || backendProcess.killed) return;
+  backendProcess.kill("SIGTERM");
+  backendProcess = undefined;
+}
+
+async function startEmbeddedBackend(config) {
+  if (!app.isPackaged) return true;
+  const backendEntry = getBackendEntryPath();
+  if (!fs.existsSync(backendEntry)) {
+    appendBackendLog(`backend entry missing: ${backendEntry}`);
+    backendStatus = { ok: false, message: `后端入口缺失：${backendEntry}` };
+    return false;
+  }
+  const [httpAvailable, wsAvailable] = await Promise.all([canListenOnPort(config.httpPort), canListenOnPort(config.wsPort)]);
+  if (!httpAvailable || !wsAvailable) {
+    appendBackendLog(`backend start blocked by port conflict: http=${config.httpPort} ws=${config.wsPort}`);
+    backendStatus = { ok: false, message: `端口冲突：HTTP ${config.httpPort} 或 WS ${config.wsPort} 已被占用` };
+    return false;
+  }
+  backendProcess = spawn(process.execPath, [backendEntry], {
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: "1",
+      NOVASTRIKE_SETTINGS_FILE: getRuntimeConfigPath(),
+      NOVASTRIKE_GSI_CFG_SOURCE: getGsiTemplatePath(),
+      NOVASTRIKE_HTTP_PORT: String(config.httpPort),
+      NOVASTRIKE_WS_PORT: String(config.wsPort)
+    }
+  });
+  backendProcess.stdout?.on("data", (chunk) => appendBackendLog(`[stdout] ${String(chunk).trimEnd()}`));
+  backendProcess.stderr?.on("data", (chunk) => appendBackendLog(`[stderr] ${String(chunk).trimEnd()}`));
+  backendProcess.on("exit", (code, signal) => {
+    appendBackendLog(`backend exited: code=${code ?? "null"} signal=${signal ?? "null"}`);
+    backendProcess = undefined;
+  });
+  const ready = await waitForBackendReady(config);
+  if (!ready) {
+    appendBackendLog("backend health check timeout");
+    backendStatus = { ok: false, message: "后端启动超时，请检查端口占用或安全软件拦截" };
+    stopEmbeddedBackend();
+    return false;
+  }
+  backendStatus = { ok: true, message: `后端已启动（HTTP:${config.httpPort} / WS:${config.wsPort}）` };
+  return true;
+}
+
+async function applyRuntimeConfig(candidate) {
+  const previous = runtimeConfig;
+  const next = normalizeRuntimeConfig({ ...previous, ...candidate });
+  if (!app.isPackaged) {
+    saveRuntimeConfig(next);
+    backendStatus = { ok: true, message: "开发模式下配置已写入，重启应用后生效" };
+    return { ok: true, message: "开发模式下配置已写入，重启应用后生效", config: runtimeConfig };
+  }
+  const [httpAvailable, wsAvailable] = await Promise.all([
+    next.httpPort === previous.httpPort ? true : canListenOnPort(next.httpPort),
+    next.wsPort === previous.wsPort ? true : canListenOnPort(next.wsPort)
+  ]);
+  if (!httpAvailable) {
+    backendStatus = { ok: false, message: `核心服务端口 ${next.httpPort} 已被占用` };
+    return { ok: false, message: `核心服务端口 ${next.httpPort} 已被占用` };
+  }
+  if (!wsAvailable) {
+    backendStatus = { ok: false, message: `核心WS服务端口 ${next.wsPort} 已被占用` };
+    return { ok: false, message: `核心WS服务端口 ${next.wsPort} 已被占用` };
+  }
+
+  saveRuntimeConfig(next);
+  stopEmbeddedBackend();
+  const started = await startEmbeddedBackend(next);
+  if (!started) {
+    saveRuntimeConfig(previous);
+    await startEmbeddedBackend(previous);
+    backendStatus = { ok: false, message: "应用配置失败，已回滚到旧配置" };
+    return { ok: false, message: "应用配置失败，已回滚到旧配置" };
+  }
+  backendStatus = { ok: true, message: `配置已应用（HTTP:${next.httpPort} / WS:${next.wsPort}）` };
+  return { ok: true, message: "配置已应用并重启后端", config: runtimeConfig };
+}
+
+function loadOverlayRoute(window, screen) {
+  if (!window) return;
+  if (!app.isPackaged) {
+    const suffix = screen ? `/?screen=${encodeURIComponent(screen)}` : "";
+    window.loadURL(`${OVERLAY_ORIGIN}${suffix}`);
+    return;
+  }
+  const overlayPath = getOverlayIndexPath();
+  const query = screen ? { screen } : undefined;
+  window.loadFile(overlayPath, query ? { query } : undefined);
 }
 
 function showMainWindow() {
@@ -118,7 +329,7 @@ function createDebugWindow() {
       preload: path.join(__dirname, "preload.cjs")
     }
   });
-  debugWindow.loadURL(`${OVERLAY_ORIGIN}/?screen=debug`);
+  loadOverlayRoute(debugWindow, "debug");
 }
 
 function updateTrayMenu() {
@@ -201,7 +412,7 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadURL(OVERLAY_ORIGIN);
+  loadOverlayRoute(mainWindow);
   mainWindow.on("show", () => updateTrayMenu());
   mainWindow.on("hide", () => updateTrayMenu());
   mainWindow.on("always-on-top-changed", () => updateTrayMenu());
@@ -237,7 +448,8 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  runtimeConfig = loadRuntimeConfig();
   ipcMain.handle("window:minimize", (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     window?.minimize();
@@ -289,6 +501,11 @@ app.whenReady().then(() => {
     return next;
   });
   ipcMain.handle("app:get-version", () => app.getVersion());
+  ipcMain.handle("runtime:get-config", () => runtimeConfig);
+  ipcMain.handle("runtime:get-backend-status", () => backendStatus);
+  ipcMain.handle("runtime:apply-config", async (_event, configPatch) => {
+    return applyRuntimeConfig(configPatch ?? {});
+  });
   ipcMain.handle("app:check-updates", async () => {
     const currentVersion = app.getVersion();
     const updateUrl = process.env.NOVASTRIKE_UPDATE_URL;
@@ -341,6 +558,14 @@ app.whenReady().then(() => {
     }
   });
 
+  const started = await startEmbeddedBackend(runtimeConfig);
+  if (!started) {
+    const fallback = saveRuntimeConfig(DEFAULT_RUNTIME_CONFIG);
+    const fallbackStarted = await startEmbeddedBackend(fallback);
+    backendStatus = fallbackStarted
+      ? { ok: false, message: "检测到端口冲突，已自动回退到默认端口" }
+      : { ok: false, message: "后端启动失败，请检查端口占用或配置" };
+  }
   createWindow();
   createTray();
 
@@ -360,5 +585,6 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  stopEmbeddedBackend();
   globalShortcut.unregisterAll();
 });

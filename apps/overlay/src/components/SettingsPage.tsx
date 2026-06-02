@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { sleep } from "@nova-strike/shared";
-import { getSettings, saveSettings, syncGsi } from "../lib/http";
+import { getSettings, saveSettings, setRuntimeConfig } from "../lib/http";
 
 export function SettingsPage(props: { onBack: () => void }) {
   const [steamLibraryPath, setSteamLibraryPath] = useState("");
+  const [httpPort, setHttpPort] = useState(37653);
+  const [wsPort, setWsPort] = useState(37654);
   const [status, setStatus] = useState("加载中...");
   const [targetPath, setTargetPath] = useState("");
   const [saving, setSaving] = useState(false);
@@ -22,11 +24,15 @@ export function SettingsPage(props: { onBack: () => void }) {
     void (async () => {
       try {
         const result = await getSettings();
+        const backend = await window.novaWindow?.getBackendStatus();
         setSteamLibraryPath(result.settings.steamLibraryPath);
-        setStatus(result.gsiSync.message);
+        setHttpPort(result.settings.httpPort);
+        setWsPort(result.settings.wsPort);
+        const backendHint = backend && !backend.ok ? `（后端状态：${backend.message}）` : "";
+        setStatus(`${result.gsiSync.message}${backendHint}`);
         setTargetPath(result.gsiSync.targetPath ?? "");
       } catch (error) {
-        setStatus(`加载失败：${String((error as Error).message)}`);
+        setStatus(`加载失败: ${String((error as Error).message)}`);
       }
     })();
   }, []);
@@ -117,24 +123,24 @@ export function SettingsPage(props: { onBack: () => void }) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const result = await saveSettings(steamLibraryPath);
-      setStatus(result.gsiSync.message);
+      const nextHttpPort = Number(httpPort);
+      const nextWsPort = Number(wsPort);
+      const result = await saveSettings({ steamLibraryPath, httpPort: nextHttpPort, wsPort: nextWsPort });
+      const applyResult = await window.novaWindow?.applyRuntimeConfig({
+        steamLibraryPath,
+        httpPort: nextHttpPort,
+        wsPort: nextWsPort
+      });
+      if (!applyResult?.ok) {
+        setStatus(applyResult?.message ?? "应用端口配置失败");
+        return;
+      }
+      setRuntimeConfig({ httpPort: nextHttpPort, wsPort: nextWsPort });
+      setStatus(`${result.gsiSync.message}；${applyResult.message}`);
       setTargetPath(result.gsiSync.targetPath ?? "");
+      window.location.reload();
     } catch (error) {
-      setStatus(`保存失败：${String((error as Error).message)}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleSync = async () => {
-    setSaving(true);
-    try {
-      const result = await syncGsi();
-      setStatus(result.gsiSync.message);
-      setTargetPath(result.gsiSync.targetPath ?? "");
-    } catch (error) {
-      setStatus(`同步失败：${String((error as Error).message)}`);
+      setStatus(`保存失败: ${String((error as Error).message)}`);
     } finally {
       setSaving(false);
     }
@@ -149,7 +155,7 @@ export function SettingsPage(props: { onBack: () => void }) {
         </button>
       </div>
       <label className="field-label" htmlFor="steam-library-path">
-        CS2 所在 Steam 库目录（含 steamapps/common）
+        CS2 所在 Steam 库目录（包含 steamapps/common）
       </label>
       <input
         className="text-input"
@@ -159,12 +165,33 @@ export function SettingsPage(props: { onBack: () => void }) {
         type="text"
         value={steamLibraryPath}
       />
+      <label className="field-label" htmlFor="http-port">
+        核心服务端口
+      </label>
+      <input
+        className="text-input"
+        id="http-port"
+        min={1}
+        max={65535}
+        onChange={(event) => setHttpPort(Number(event.target.value || "0"))}
+        type="number"
+        value={httpPort}
+      />
+      <label className="field-label" htmlFor="ws-port">
+        核心WS服务端口
+      </label>
+      <input
+        className="text-input"
+        id="ws-port"
+        min={1}
+        max={65535}
+        onChange={(event) => setWsPort(Number(event.target.value || "0"))}
+        type="number"
+        value={wsPort}
+      />
       <div className="settings-actions">
         <button className="primary-btn" disabled={saving || !steamLibraryPath.trim()} onClick={handleSave} type="button">
-          保存并同步
-        </button>
-        <button className="ghost-btn" disabled={saving} onClick={handleSync} type="button">
-          立即同步 GSI
+          保存并重启后端
         </button>
       </div>
       <div className="settings-status">
@@ -220,9 +247,7 @@ export function SettingsPage(props: { onBack: () => void }) {
         <div className="settings-version-row">
           <span>
             当前版本：{appVersion}
-            {updateBadge.text ? (
-              <em className={`version-badge ${updateBadge.type}`}>{updateBadge.text}</em>
-            ) : null}
+            {updateBadge.text ? <em className={`version-badge ${updateBadge.type}`}>{updateBadge.text}</em> : null}
           </span>
           <button className="ghost-btn" disabled={checkingUpdate} onClick={() => void handleCheckUpdates()} type="button">
             {checkingUpdate ? (

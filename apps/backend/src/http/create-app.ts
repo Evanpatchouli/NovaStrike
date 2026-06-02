@@ -14,7 +14,11 @@ export function createApp(input: {
   settingsService: SettingsService;
   gsiSyncService: GsiSyncService;
 }) {
-  const settingsSchema = z.object({ steamLibraryPath: z.string().min(1) });
+  const settingsSchema = z.object({
+    steamLibraryPath: z.string().optional(),
+    httpPort: z.number().int().min(1).max(65535).optional(),
+    wsPort: z.number().int().min(1).max(65535).optional()
+  });
   const app = Fastify({ logger: { level: "info" } });
   app.register(cors, { origin: true });
   app.get("/health", async () => ({ ok: true, name: "NovaStrike", snapshot: input.registry.getSnapshot() }));

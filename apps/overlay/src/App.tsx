@@ -5,8 +5,9 @@ import { MatchOverviewPanel } from "./components/MatchOverviewPanel";
 import { SettingsPage } from "./components/SettingsPage";
 import { TempoPanel } from "./components/TempoPanel";
 import { TimelinePanel } from "./components/TimelinePanel";
+import { initRuntimeConfig, getRuntimeConfig } from "./lib/http";
 import { WindowBar } from "./components/WindowBar";
-import { connectNovaStrikeWs } from "./lib/ws";
+import { connectNovaStrikeWs, setWsPort } from "./lib/ws";
 import { useNovaStrikeStore } from "./store/useNovaStrikeStore";
 
 type Screen = "overlay" | "settings" | "debug";
@@ -21,16 +22,30 @@ export function App() {
   const { snapshot, events, wsConnected, setWsConnected, applyMessage } = useNovaStrikeStore();
   const [screen, setScreen] = useState<Screen>(() => resolveInitialScreen());
   const [showOverlayHeader, setShowOverlayHeader] = useState(true);
+  const [runtimeReady, setRuntimeReady] = useState(false);
   const isDev = import.meta.env.DEV;
 
+  useEffect(() => {
+    void (async () => {
+      await initRuntimeConfig();
+      const config = getRuntimeConfig();
+      setWsPort(config.wsPort);
+      setRuntimeReady(true);
+    })();
+  }, []);
+
   useEffect(
-    () =>
+    () => {
+      if (!runtimeReady) return;
+      return (
       connectNovaStrikeWs({
         onOpen: () => setWsConnected(true),
         onClose: () => setWsConnected(false),
         onMessage: applyMessage,
-      }),
-    [applyMessage, setWsConnected],
+      })
+      );
+    },
+    [applyMessage, runtimeReady, setWsConnected],
   );
 
   useEffect(() => {

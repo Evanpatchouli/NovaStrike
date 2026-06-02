@@ -8,7 +8,9 @@ export class GsiSyncService {
   private readonly sourceCfgPathCandidates: string[];
 
   constructor() {
+    const envSourcePath = process.env.NOVASTRIKE_GSI_CFG_SOURCE?.trim();
     this.sourceCfgPathCandidates = [
+      ...(envSourcePath ? [envSourcePath] : []),
       path.join(process.cwd(), "docs", GSI_FILE_NAME),
       path.resolve(process.cwd(), "..", "docs", GSI_FILE_NAME),
       path.resolve(process.cwd(), "..", "..", "docs", GSI_FILE_NAME)

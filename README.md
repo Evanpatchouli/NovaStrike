@@ -37,9 +37,9 @@ pnpm dev
 
 ## 地址
 
-- Backend Health: `http://127.0.0.1:3000/health`
-- GSI Endpoint: `http://127.0.0.1:3000/gsi`
-- WebSocket: `ws://127.0.0.1:3001`
+- Backend Health: `http://127.0.0.1:37653/health`
+- GSI Endpoint: `http://127.0.0.1:37653/gsi`
+- WebSocket: `ws://127.0.0.1:37654`
 - Overlay: `http://127.0.0.1:5173`
 
 ## GSI 自动同步
@@ -68,3 +68,18 @@ pnpm dev
   - `GET /dev/gsi/recent`
   - `GET /dev/events/recent`
   - `POST /settings/sync-gsi`
+
+## Desktop Packaging
+
+- Build unpacked app: pnpm build:desktop
+- Build Windows installers: pnpm dist:desktop
+- Output directory: apps/desktop/dist
+
+## Runtime Config
+
+- Config file path (Windows): `%APPDATA%\\NovaStrike\\config.json`
+- If the file does not exist, app will auto-create with defaults:
+  - `steamLibraryPath`: `""`
+  - `httpPort`: `37653`
+  - `wsPort`: `37654`
+- If ports are invalid or occupied, update this file manually and restart app.

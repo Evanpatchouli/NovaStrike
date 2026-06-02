@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld("novaWindow", {
     return () => ipcRenderer.removeListener("ui:overlay-header-visible-changed", listener);
   },
   getAppVersion: () => ipcRenderer.invoke("app:get-version"),
+  getRuntimeConfig: () => ipcRenderer.invoke("runtime:get-config"),
+  getBackendStatus: () => ipcRenderer.invoke("runtime:get-backend-status"),
+  applyRuntimeConfig: (config) => ipcRenderer.invoke("runtime:apply-config", config),
   checkUpdates: () => ipcRenderer.invoke("app:check-updates"),
   minimize: () => ipcRenderer.invoke("window:minimize"),
   toggleMaximize: () => ipcRenderer.invoke("window:toggle-maximize"),

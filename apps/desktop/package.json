@@ -5,15 +5,61 @@
   "main": "src/main.cjs",
   "scripts": {
     "dev": "electronmon src/main.cjs",
-    "build": "echo desktop build pending",
+    "build": "pnpm --filter @nova-strike/backend build:bundle && pnpm --filter @nova-strike/overlay build && electron-builder --dir",
+    "dist": "pnpm --filter @nova-strike/backend build:bundle && pnpm --filter @nova-strike/overlay build && electron-builder -w nsis portable",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
-  "dependencies": {
-    "electron": "^36.9.5"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^24.10.1",
+    "electron": "^36.9.5",
+    "electron-builder": "^24.13.3",
     "electronmon": "^2.0.3",
     "typescript": "^5.9.3"
+  },
+  "build": {
+    "appId": "com.novastrike.desktop",
+    "productName": "NovaStrike",
+    "asar": true,
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "extraResources": [
+      {
+        "from": "../overlay/dist",
+        "to": "overlay-dist"
+      },
+      {
+        "from": "../backend/dist-bundle",
+        "to": "backend-dist"
+      },
+      {
+        "from": "../../docs/gamestate_integration_novastrike.cfg",
+        "to": "gsi-template/gamestate_integration_novastrike.cfg"
+      }
+    ],
+    "extraMetadata": {
+      "main": "src/main.cjs"
+    },
+    "win": {
+      "icon": "assets/icon-512.png",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "artifactName": "${productName}-${version}-${os}-${arch}-nsis.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-${os}-${arch}-portable.${ext}"
+    }
   }
 }

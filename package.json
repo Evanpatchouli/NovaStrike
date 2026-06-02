@@ -9,6 +9,8 @@
     "dev:backend": "pnpm --filter @nova-strike/backend dev",
     "dev:overlay": "pnpm --filter @nova-strike/overlay dev",
     "dev:desktop": "pnpm --filter @nova-strike/desktop dev",
+    "build:desktop": "pnpm --filter @nova-strike/desktop build",
+    "dist:desktop": "pnpm --filter @nova-strike/desktop dist",
     "version:app": "node scripts/version-app.mjs",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck"

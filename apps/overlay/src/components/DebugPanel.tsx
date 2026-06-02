@@ -7,7 +7,7 @@ type DebugLog = {
   detail: string;
 };
 
-const BASE_URL = "http://127.0.0.1:3000";
+const BASE_URL = "http://127.0.0.1:37653";
 
 async function callApi(path: string, method: "GET" | "POST") {
   const response = await fetch(`${BASE_URL}${path}`, { method });
