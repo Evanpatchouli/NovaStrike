@@ -204,9 +204,26 @@ async function waitForBackendReady(config, timeoutMs = 8000) {
 }
 
 function stopEmbeddedBackend() {
-  if (!backendProcess || backendProcess.killed) return;
-  backendProcess.kill("SIGTERM");
+  const processRef = backendProcess;
   backendProcess = undefined;
+  if (!processRef || processRef.killed) return processRef;
+  processRef.kill("SIGTERM");
+  return processRef;
+}
+
+function waitForBackendExit(processRef, timeoutMs = 5000) {
+  if (!processRef) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    processRef.once("exit", () => finish(true));
+  });
 }
 
 async function startEmbeddedBackend(config) {
@@ -260,6 +277,12 @@ async function applyRuntimeConfig(candidate) {
     backendStatus = { ok: true, message: "开发模式下配置已写入，重启应用后生效" };
     return { ok: true, message: "开发模式下配置已写入，重启应用后生效", config: runtimeConfig };
   }
+  const portsChanged = next.httpPort !== previous.httpPort || next.wsPort !== previous.wsPort;
+  if (!portsChanged) {
+    saveRuntimeConfig(next);
+    backendStatus = { ok: true, message: "配置已保存，端口未变更，无需重启后端" };
+    return { ok: true, message: "配置已保存，端口未变更，无需重启后端", config: runtimeConfig };
+  }
   const [httpAvailable, wsAvailable] = await Promise.all([
     next.httpPort === previous.httpPort ? true : canListenOnPort(next.httpPort),
     next.wsPort === previous.wsPort ? true : canListenOnPort(next.wsPort)
@@ -274,7 +297,8 @@ async function applyRuntimeConfig(candidate) {
   }
 
   saveRuntimeConfig(next);
-  stopEmbeddedBackend();
+  const backendRef = stopEmbeddedBackend();
+  await waitForBackendExit(backendRef);
   const started = await startEmbeddedBackend(next);
   if (!started) {
     saveRuntimeConfig(previous);

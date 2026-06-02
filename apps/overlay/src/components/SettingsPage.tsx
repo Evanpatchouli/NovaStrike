@@ -17,7 +17,7 @@ export function SettingsPage(props: { onBack: () => void }) {
   const [updateMessage, setUpdateMessage] = useState("");
   const [updateBadge, setUpdateBadge] = useState<{ type: "latest" | "update" | "unknown"; text: string }>({
     type: "unknown",
-    text: ""
+    text: "",
   });
 
   useEffect(() => {
@@ -129,7 +129,7 @@ export function SettingsPage(props: { onBack: () => void }) {
       const applyResult = await window.novaWindow?.applyRuntimeConfig({
         steamLibraryPath,
         httpPort: nextHttpPort,
-        wsPort: nextWsPort
+        wsPort: nextWsPort,
       });
       if (!applyResult?.ok) {
         setStatus(applyResult?.message ?? "应用端口配置失败");
@@ -161,7 +161,7 @@ export function SettingsPage(props: { onBack: () => void }) {
         className="text-input"
         id="steam-library-path"
         onChange={(event) => setSteamLibraryPath(event.target.value)}
-        placeholder="例如：D:\\SteamLibrary"
+        placeholder="例如：D:\SteamLibrary"
         type="text"
         value={steamLibraryPath}
       />
@@ -190,7 +190,12 @@ export function SettingsPage(props: { onBack: () => void }) {
         value={wsPort}
       />
       <div className="settings-actions">
-        <button className="primary-btn" disabled={saving || !steamLibraryPath.trim()} onClick={handleSave} type="button">
+        <button
+          className="primary-btn"
+          disabled={saving || !steamLibraryPath.trim()}
+          onClick={handleSave}
+          type="button"
+        >
           保存并重启后端
         </button>
       </div>
@@ -249,7 +254,12 @@ export function SettingsPage(props: { onBack: () => void }) {
             当前版本：{appVersion}
             {updateBadge.text ? <em className={`version-badge ${updateBadge.type}`}>{updateBadge.text}</em> : null}
           </span>
-          <button className="ghost-btn" disabled={checkingUpdate} onClick={() => void handleCheckUpdates()} type="button">
+          <button
+            className="ghost-btn"
+            disabled={checkingUpdate}
+            onClick={() => void handleCheckUpdates()}
+            type="button"
+          >
             {checkingUpdate ? (
               <>
                 <i className="btn-spinner" />
